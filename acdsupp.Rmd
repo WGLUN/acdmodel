@@ -1,0 +1,35 @@
+# load required packages
+library(Seurat)
+library(ggpubr)
+library(dplyr)
+library(patchwork)
+library(reshape2)
+library(RColorBrewer)
+library(corrplot)
+
+# Linear regression analysis between WT and S52F for cells in the cluster of Matrix.FB-2
+mes.work <- subset(acd.work,idents = 'Matrix.FB-2')
+wtcells <- Cells(subset(x = mes.work, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = mes.work, subset = orig.ident == "S52F"))
+Idents(object = mes.work, cells = wtcells) <- 'WT'
+Idents(object = mes.work, cells = mtcells) <- 'S52F'
+diff.genes <- FindMarkers(mes.work, ident.1 = 'S52F', ident.2 = 'WT')
+write.csv (diff.genes, file= 'diffgene.csv')
+mes.work <- ScaleData(mes.work, verbose = FALSE,features = heatmarker)
+DoHeatmap(mes.work, features = heatmarker,group.by = 'orig.ident',draw.lines = T,lines.width = 20,label = F) + theme(legend.text = element_text(size = 15,face = "bold"), legend.key.size = unit(2, 'lines'),legend.position = "right")
+avg.mes.cells <- log1p(AverageExpression(mes.work, verbose = FALSE)$RNA)
+avg.mes.cells$gene <- rownames(avg.mes.cells)
+ggplot(avg.mes.cells, aes(WT, S52F)) + geom_point() + theme_bw() + theme(legend.position = "none",legend.title=element_blank(),legend.text=element_text(size=10),axis.title.x =element_text(size=15),axis.title.y=element_text(size=15),axis.text.x =element_text(size=15),axis.text.y=element_text(size=15)) + xlim(0,5) + ylim(0,5)
+# Linear regression analysis between WT and S52F for cells in the cluster of AT1
+epi.work <- subset(acd.work,idents = 'AT1')
+wtcells <- Cells(subset(x = epi.work, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = epi.work, subset = orig.ident == "S52F"))
+Idents(object = epi.work, cells = wtcells) <- 'WT'
+Idents(object = epi.work, cells = mtcells) <- 'S52F'
+diff.genes <- FindMarkers(epi.work, ident.1 = 'S52F', ident.2 = 'WT')
+write.csv (diff.genes, file= 'diffgene.csv')
+epi.work <- ScaleData(epi.work, verbose = FALSE,features = heatmarker)
+DoHeatmap(epi.work, features = heatmarker,group.by = 'orig.ident',draw.lines = T,lines.width = 20,label = F) + theme(legend.text = element_text(size = 15,face = "bold"), legend.key.size = unit(2, 'lines'),legend.position = "right")
+avg.epi.cells <- log1p(AverageExpression(epi.work, verbose = FALSE)$RNA)
+avg.epi.cells$gene <- rownames(avg.epi.cells)
+ggplot(avg.epi.cells, aes(WT, S52F)) + geom_point() + theme_bw() + theme(legend.position = "none",legend.title=element_blank(),legend.text=element_text(size=10),axis.title.x =element_text(size=15),axis.title.y=element_text(size=15),axis.text.x =element_text(size=15),axis.text.y=element_text(size=15)) + xlim(0,5) + ylim(0,5)
