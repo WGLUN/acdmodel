@@ -1,0 +1,123 @@
+# load required packages
+library(Seurat)
+library(ggpubr)
+library(dplyr)
+library(ggrepel)
+library(stringr)
+library(patchwork)
+library(reshape2)
+library(RColorBrewer)
+library(corrplot)
+library(cowplot)
+
+# read dataset from outs folder of cellranger count
+wt.data <- Read10X(data.dir = "../data/acd-wt/filtered_gene_bc_matrices/")
+wt.data <- Read10X(data.dir = "../data/acd-mt/filtered_gene_bc_matrices/")
+# Initialize the Seurat object with the raw counts
+wt.all <- CreateSeuratObject(counts = wt.data, project = "WT")
+mt.all <- CreateSeuratObject(counts = mt.data, project = "S52F")
+# Stash QC stats data into the Seurat object
+wt.all[["percent.mt"]] <- PercentageFeatureSet(wt.all, pattern = "^mt-")
+mt.all[["percent.mt"]] <- PercentageFeatureSet(mt.all, pattern = "^mt-")
+# Visualize QC metrics as a violin plot
+VlnPlot(wt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+VlnPlot(mt.all, features = c("nFeature_RNA", "nCount_RNA", "percent.mt"), ncol = 3)
+# Setup the Seurat objects for integrated analysis
+acd.list <- list(wt.all,mt.all)
+acd.list <- lapply(X = acd.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+# Perform integration
+acd.anchors <- FindIntegrationAnchors(object.list = acd.list, dims = 1:20)
+acd.combined <- IntegrateData(anchorset = acd.anchors, dims = 1:20)
+# Perform an integrated analysis
+DefaultAssay(acd.combined) <- "integrated"
+acd.combined <- ScaleData(acd.combined, features = genework,verbose = FALSE)
+acd.combined <- RunPCA(acd.combined, npcs = 30, verbose = FALSE)
+ElbowPlot(acd.combined)
+acd.combined <- RunUMAP(acd.combined, reduction = "pca", dims = 1:8)
+acd.combined <- FindNeighbors(acd.combined, reduction = "pca", dims = 1:8)
+acd.combined <- FindClusters(acd.combined, resolution = 0.5)
+# Visualization of results
+DimPlot(acd.combined, reduction = "umap",split.by = 'orig.ident')
+DimPlot(acd.combined, reduction = "umap",label = T)
+# Check the cell distribution
+table(Idents(acd.combined),acd.combined$orig.ident)
+#Identify conserved cell type markers
+acd.markers <- FindAllMarkers(acd.combined, only.pos = TRUE, min.pct = 0.4, logfc.threshold = 0.4)
+# Rename Idents
+acd.combined <- RenameIdents(acd.combined, "AT1" = "AT1", "AT1/2" = "AT1/2", "AT2" = "AT2", "Endo" = "Endothelial", "Fibroblast-1" = "Fibroblast-1", "Fibroblast-2" = "Fibroblast-2","Pericyte-1" = "Pericyte", "Pericyte-2" = "Pericyte", "Matrix Mes-1" = "Matrix.FB-1", "Matrix Mes-2" = "Matrix.FB-2", "smooth muscle" = "Myofibroblast","Ciliated" = "Ciliated","club" = "Club")
+# Generation of Heatmap
+top10 <- acd.markers %>% group_by(cluster) %>% top_n(n = 10, wt = avg_logFC)
+DoHeatmap(acd.combined, features = top10$gene) + NoLegend()
+# Generation of Dotplot
+DotPlot(acd.combined, features = c('Acvrl1','Acvr1b','Acvr1c','Bmpr1a','Bmpr1b','Tgfbr1','Tgfbr2','Acvr2a','Acvr2b','Bmpr2'), cols = c("blue","red"), dot.scale = 8,split.by = "orig.ident") + RotatedAxis() + coord_flip()
+# Generation of correlation plot among clusters
+palette = colorRampPalette(c("green", "white", "red")) (20)
+av.exp <- AverageExpression(acd.combined)$RNA
+cor.exp <- as.matrix(cor(av.exp))
+heatmap(x = cor.exp, col = palette,Rowv = NA,symm = TRUE,scale = "row",margins = c(8, 8))
+# Linear regression analysis between WT and S52F for cells in the cluster of Matrix.FB-2
+mes.work <- subset(acd.work,idents = 'Matrix.FB-2')
+wtcells <- Cells(subset(x = mes.work, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = mes.work, subset = orig.ident == "S52F"))
+Idents(object = mes.work, cells = wtcells) <- 'WT'
+Idents(object = mes.work, cells = mtcells) <- 'S52F'
+diff.genes <- FindMarkers(mes.work, ident.1 = 'S52F', ident.2 = 'WT')
+write.csv (diff.genes, file= 'diffgene.csv')
+mes.work <- ScaleData(mes.work, verbose = FALSE,features = heatmarker)
+DoHeatmap(mes.work, features = heatmarker,group.by = 'orig.ident',draw.lines = T,lines.width = 20,label = F) + theme(legend.text = element_text(size = 15,face = "bold"), legend.key.size = unit(2, 'lines'),legend.position = "right")
+avg.mes.cells <- log1p(AverageExpression(mes.work, verbose = FALSE)$RNA)
+avg.mes.cells$gene <- rownames(avg.mes.cells)
+ggplot(avg.mes.cells, aes(WT, S52F)) + geom_point() + theme_bw() + theme(legend.position = "none",legend.title=element_blank(),legend.text=element_text(size=10),axis.title.x =element_text(size=15),axis.title.y=element_text(size=15),axis.text.x =element_text(size=15),axis.text.y=element_text(size=15)) + xlim(0,5) + ylim(0,5)
+# Linear regression analysis between WT and S52F for cells in the cluster of AT1
+epi.work <- subset(acd.work,idents = 'AT1')
+wtcells <- Cells(subset(x = epi.work, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = epi.work, subset = orig.ident == "S52F"))
+Idents(object = epi.work, cells = wtcells) <- 'WT'
+Idents(object = epi.work, cells = mtcells) <- 'S52F'
+diff.genes <- FindMarkers(epi.work, ident.1 = 'S52F', ident.2 = 'WT')
+write.csv (diff.genes, file= 'diffgene.csv')
+epi.work <- ScaleData(epi.work, verbose = FALSE,features = heatmarker)
+DoHeatmap(epi.work, features = heatmarker,group.by = 'orig.ident',draw.lines = T,lines.width = 20,label = F) + theme(legend.text = element_text(size = 15,face = "bold"), legend.key.size = unit(2, 'lines'),legend.position = "right")
+avg.epi.cells <- log1p(AverageExpression(epi.work, verbose = FALSE)$RNA)
+avg.epi.cells$gene <- rownames(avg.epi.cells)
+ggplot(avg.epi.cells, aes(WT, S52F)) + geom_point() + theme_bw() + theme(legend.position = "none",legend.title=element_blank(),legend.text=element_text(size=10),axis.title.x =element_text(size=15),axis.title.y=element_text(size=15),axis.text.x =element_text(size=15),axis.text.y=element_text(size=15)) + xlim(0,5) + ylim(0,5)
+# Cells distribution across clusters and pie plot
+cell.prop <- prop.table(table(Idents(acd.combined),acd.combined$orig.ident),2)
+cell.prop <- 100*cell.prop
+cell.prop <- as.data.frame(cell.prop)
+names(cell.prop)[1:3] <- c('Cluster','group','value')
+ggplot(cell.prop, aes(fill=Cluster, y=value, x=group)) + geom_bar(position="stack", stat="identity") + theme_bw() + scale_y_continuous(expand = c(0,0),limits = c (0,100)) + theme(legend.position = "right",legend.title=element_blank(),legend.text=element_text(size=15),axis.title.x =element_text(size=0),axis.title.y=element_text(size=0),axis.text.x =element_text(size=0),axis.text.y=element_text(size=15))
+ggplot(cell.prop[1:12,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
+ggplot(cell.prop[13:24,], aes(fill=Cluster, y=value, x='')) + geom_bar(stat="identity", width = 1) + coord_polar("y", start=0) + theme_void() + NoLegend()
+# Analyze endothelial cells
+wtcells <- Cells(subset(x = acd.combined, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = acd.combined, subset = orig.ident == "S52F"))
+endo.combined <- subset(acd.combined, cells = c(wtcells,mt.cells))
+endo.combined <- DietSeurat(endo.combined)
+endo.list <- SplitObject(endo.combined, split.by = "orig.ident")
+endo.list <- lapply(X = endo.list, FUN = function(x) {
+  x <- NormalizeData(x)
+  x <- FindVariableFeatures(x, selection.method = "vst", nfeatures = 2000)
+})
+endo.anchors <- FindIntegrationAnchors(object.list = endo.list, dims = 1:20)
+endo.combined <- IntegrateData(anchorset = endo.anchors, dims = 1:20)
+DefaultAssay(endo.combined) <- "integrated"
+endo.combined <- ScaleData(endo.combined, features = genework,verbose = FALSE)
+endo.combined <- RunPCA(endo.combined, npcs = 30, verbose = FALSE)
+ElbowPlot(endo.combined)
+endo.combined <- RunUMAP(endo.combined, reduction = "pca", dims = 1:4)
+endo.combined <- FindNeighbors(endo.combined, reduction = "pca", dims = 1:4)
+endo.combined <- FindClusters(endo.combined, resolution = 0.4)
+# Comparative analysis of gCap cells
+cap.combined <- subset(endo.combined,ident = 'gCap')
+wtcells <- Cells(subset(x = cap.combined, subset = orig.ident == "WT"))
+mtcells <- Cells(subset(x = cap.combined, subset = orig.ident == "S52F"))
+Idents(object = cap.combined, cells = wtcells) <- 'WT'
+Idents(object = cap.combined, cells = mtcells) <- 'S52F'
+diff.genes <- FindMarkers(cap.combined, ident.1 = 'S52F', ident.2 = 'WT')
+cap.combined <- ScaleData(cap.combined, verbose = FALSE,features = genework)
+DoHeatmap(cap.combined, features = heatmarker,group.by = 'orig.ident',draw.lines = T,lines.width = 20,label = F) + theme(legend.text = element_text(size = 15,face = "bold"), legend.key.size = unit(2, 'lines'),legend.position = "right")
+DimPlot(cap.combined, reduction = "umap", label = T,cols = DiscretePalette(12,palette = NULL)) + geom_text_repel(aes(label=acd$idents),nudge_y = 1)
